@@ -3,6 +3,10 @@ CISC455/851 Group Project - EA for 9x9 Sudoku
 """
 
 # 0s are designated as "empty" spots, they need to be filled in by the EA with 1-9 values
+import random
+import operator
+
+
 DEFAULT_PUZZLE = (
     "530070000"
     "600195000"
@@ -83,8 +87,33 @@ Initialization methods
 
 def sudoku_population(pop_size, given_grid):
     """Initialize a population of Sudoku candidates."""
+    
 
     population = []
+
+    for _ in range(pop_size):
+        candidate = []
+
+        for row in range(9):
+            new_row = given_grid[row].copy()
+
+            # numbers already used in the row
+            used = [x for x in new_row if x != 0]
+
+            # numbers missing from the row
+            missing = [x for x in range(1, 10) if x not in used]
+
+            random.shuffle(missing)
+
+            idx = 0
+            for col in range(9):
+                if new_row[col] == 0:
+                    new_row[col] = missing[idx]
+                    idx += 1
+
+            candidate.append(new_row)
+
+        population.append(candidate)
 
     return population
 
@@ -94,8 +123,26 @@ Mutation methods
 
 def sudoku_swap(individual, mask):
     """Swap two mutable values in one row."""
+    
 
-    mutant = []
+    mutant = [row.copy() for row in individual]
+
+    # find rows that have at least 2 mutable cells
+    valid_rows = []
+    for r in range(9):
+        mutable_cols = [c for c in range(9) if not mask[r][c]]
+        if len(mutable_cols) >= 2:
+            valid_rows.append((r, mutable_cols))
+
+    # nothing to mutate
+    if not valid_rows:
+        return mutant
+
+    # pick one row, then swap 2 mutable positions
+    row, mutable_cols = random.choice(valid_rows)
+    c1, c2 = random.sample(mutable_cols, 2)
+
+    mutant[row][c1], mutant[row][c2] = mutant[row][c2], mutant[row][c1]
 
     return mutant
 
@@ -104,8 +151,20 @@ Recombination methods
 """
 
 def sudoku_row_crossover(parent1, parent2):
+
+
+    point = random.randint(1, 8)
+
     offspring1 = []
     offspring2 = []
+
+    for r in range(point):
+        offspring1.append(parent1[r].copy())
+        offspring2.append(parent2[r].copy())
+
+    for r in range(point, 9):
+        offspring1.append(parent2[r].copy())
+        offspring2.append(parent1[r].copy())
 
     return offspring1, offspring2
 
@@ -114,7 +173,23 @@ Parent selection methods
 """
 
 def tournament(fitness, mating_pool_size, tournament_size):
+    """Tournament selection"""
+
     selected_to_mate = []
+
+    while len(selected_to_mate) < mating_pool_size:
+
+        # pick random individuals for the tournament
+        competitors = random.sample(range(len(fitness)), tournament_size)
+
+        # find the best among them
+        best = competitors[0]
+        for idx in competitors:
+            if fitness[idx] > fitness[best]:
+                best = idx
+
+        # add winner to mating pool
+        selected_to_mate.append(best)
 
     return selected_to_mate
 
