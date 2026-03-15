@@ -258,12 +258,12 @@ def main():
     print_grid(given_grid)
 
     # EA parameters
-    popsize = 800
-    mating_pool_size = 600  # keep even so parents pair cleanly
+    popsize = 1000
+    mating_pool_size = 500  # keep even so parents pair cleanly
     tournament_size = 2
-    xover_rate = 0.9
-    mut_rate = 0.7
-    gen_limit = 3000
+    xover_rate = 0.65
+    mut_rate = 0.85
+    gen_limit = 4000
 
     # initialize population
     gen = 0
