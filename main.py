@@ -198,14 +198,35 @@ Survivor selection methods
 """
 
 def sort_population(population, fitness):
+    pop_fit_pair = list(map(list, zip(population, fitness)))
+    pop_fit_pair.sort(key=operator.itemgetter(1), reverse=True)
+
     sorted_pop = []
     sorted_fit = []
+
+    for entry in pop_fit_pair:
+        sorted_pop.append(entry[0])
+        sorted_fit.append(entry[1])
 
     return sorted_pop, sorted_fit
 
 def replacement(current_pop, current_fitness, offspring, offspring_fitness):
+    """Offspring replace the worst individuals in the current generation."""
     population = []
     fitness = []
+
+    sorted_pop, sorted_fit = sort_population(current_pop.copy(), current_fitness.copy())
+    k = len(current_pop) - len(offspring)  # number of elites to keep
+
+    # keep top-k from current population
+    for i in range(0, k):
+        population.append(sorted_pop[i])
+        fitness.append(sorted_fit[i])
+
+    # add all offspring
+    for j in range(0, len(offspring)):
+        population.append(offspring[j])
+        fitness.append(offspring_fitness[j])
 
     return population, fitness
 
@@ -227,17 +248,81 @@ An evolutionary algorithm for the Sudoku puzzle
 """
 
 def main():
+    random.seed()
+
     puzzle = DEFAULT_PUZZLE
     given_grid = parse_puzzle(puzzle) # reads puzzle string into a 2D list of integers
     mask = fixed_mask(given_grid) # converts grid to a mask of true false, with values that are 0 taking the value of false, as they are modifiable by the EA
 
+    print("Given puzzle:")
     print_grid(given_grid)
-    print_grid(mask)
 
-    # with the default puzzle the printout below doesn't really make sense, since it is evaluating 0s as part of the
-    # actual solution; the first generation would fill in the 0s with actual values
-    fitness = fitness_sudoku(given_grid)
-    print(f"Initial fitness: {fitness}")
+    # EA parameters
+    popsize = 800
+    mating_pool_size = 600  # keep even so parents pair cleanly
+    tournament_size = 2
+    xover_rate = 0.9
+    mut_rate = 0.7
+    gen_limit = 3000
+
+    # initialize population
+    gen = 0
+    population = sudoku_population(popsize, given_grid)
+    fitness = []
+    for i in range(0, popsize):
+        fitness.append(fitness_sudoku(population[i]))
+
+    print("generation", gen, ": best fitness", max(fitness),
+          "average fitness", round(sum(fitness) / len(fitness), 2))
+
+    # evolution begins
+    while gen < gen_limit and max(fitness) < 243:
+        parents_index = tournament(fitness, mating_pool_size, tournament_size)
+        random.shuffle(parents_index)
+
+        offspring = []
+        offspring_fitness = []
+
+        # pair parents safely: (0,1), (2,3), ...
+        for i in range(0, len(parents_index) - 1, 2):
+            p1 = population[parents_index[i]]
+            p2 = population[parents_index[i + 1]]
+
+            # recombination
+            if random.random() < xover_rate:
+                off1, off2 = sudoku_row_crossover(p1, p2)
+            else:
+                off1 = [row.copy() for row in p1]
+                off2 = [row.copy() for row in p2]
+
+            # mutation
+            if random.random() < mut_rate:
+                off1 = sudoku_swap(off1, mask)
+            if random.random() < mut_rate:
+                off2 = sudoku_swap(off2, mask)
+
+            offspring.append(off1)
+            offspring_fitness.append(fitness_sudoku(off1))
+            offspring.append(off2)
+            offspring_fitness.append(fitness_sudoku(off2))
+
+        # survivor selection
+        population, fitness = replacement(population, fitness, offspring, offspring_fitness)
+
+        gen = gen + 1
+        print("generation", gen, ": best fitness", max(fitness),
+              "average fitness", round(sum(fitness) / len(fitness), 2))
+
+    # print best candidate found
+    best_index = fitness.index(max(fitness))
+    best = population[best_index]
+    best_fit = fitness[best_index]
+
+    print("\nBest candidate after evolution:")
+    print_grid(best)
+    print("fitness:", best_fit)
+    print("total conflicts:", 243 - best_fit)
+    print("generations:", gen)
 
 if __name__ == "__main__":
     main()
