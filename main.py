@@ -6,7 +6,6 @@ CISC455/851 Group Project - EA for 9x9 Sudoku
 import random
 import operator
 
-
 DEFAULT_PUZZLE = (
     "530070000"
     "600195000"
@@ -87,8 +86,6 @@ Initialization methods
 
 def sudoku_population(pop_size, given_grid):
     """Initialize a population of Sudoku candidates."""
-    
-
     population = []
 
     for _ in range(pop_size):
@@ -123,8 +120,6 @@ Mutation methods
 
 def sudoku_swap(individual, mask):
     """Swap two mutable values in one row."""
-    
-
     mutant = [row.copy() for row in individual]
 
     # find rows that have at least 2 mutable cells
@@ -151,8 +146,6 @@ Recombination methods
 """
 
 def sudoku_row_crossover(parent1, parent2):
-
-
     point = random.randint(1, 8)
 
     offspring1 = []
@@ -174,7 +167,6 @@ Parent selection methods
 
 def tournament(fitness, mating_pool_size, tournament_size):
     """Tournament selection"""
-
     selected_to_mate = []
 
     while len(selected_to_mate) < mating_pool_size:
@@ -263,7 +255,7 @@ def main():
     tournament_size = 2
     xover_rate = 0.65
     mut_rate = 0.85
-    gen_limit = 4000
+    gen_limit = 1000
 
     # initialize population
     gen = 0
