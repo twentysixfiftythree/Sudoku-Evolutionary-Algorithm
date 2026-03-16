@@ -86,29 +86,30 @@ Initialization methods
 
 def sudoku_population(pop_size, given_grid):
     """Initialize a population of Sudoku candidates."""
+    
     population = []
 
     for _ in range(pop_size):
-        candidate = []
+        candidate = [row.copy() for row in given_grid]
 
-        for row in range(9):
-            new_row = given_grid[row].copy()
+        for box_row in range(0, 9, 3):
+            for box_col in range(0, 9, 3):
 
-            # numbers already used in the row
-            used = [x for x in new_row if x != 0]
+                present = []
+                empty = []
 
-            # numbers missing from the row
-            missing = [x for x in range(1, 10) if x not in used]
+                for r in range(box_row, box_row+3):
+                    for c in range(box_col, box_col+3):
+                        if candidate[r][c] != 0:
+                            present.append(candidate[r][c])
+                        else:
+                            empty.append((r,c))
 
-            random.shuffle(missing)
+                missing = [x for x in range(1,10) if x not in present]
+                random.shuffle(missing)
 
-            idx = 0
-            for col in range(9):
-                if new_row[col] == 0:
-                    new_row[col] = missing[idx]
-                    idx += 1
-
-            candidate.append(new_row)
+                for i,(r,c) in enumerate(empty):
+                    candidate[r][c] = missing[i]
 
         population.append(candidate)
 
@@ -119,25 +120,33 @@ Mutation methods
 """
 
 def sudoku_swap(individual, mask):
-    """Swap two mutable values in one row."""
+    """Mutation: swap two mutable values in a row that contains conflicts."""
+
+    # Copy individual so original candidate is not modified
     mutant = [row.copy() for row in individual]
 
-    # find rows that have at least 2 mutable cells
-    valid_rows = []
-    for r in range(9):
-        mutable_cols = [c for c in range(9) if not mask[r][c]]
-        if len(mutable_cols) >= 2:
-            valid_rows.append((r, mutable_cols))
+    conflict_rows = []
 
-    # nothing to mutate
-    if not valid_rows:
+    # Identify rows that currently violate Sudoku constraints (duplicates)
+    for r in range(9):
+        if len(set(mutant[r])) < 9:
+            conflict_rows.append(r)
+
+    if not conflict_rows:
         return mutant
 
-    # pick one row, then swap 2 mutable positions
-    row, mutable_cols = random.choice(valid_rows)
-    c1, c2 = random.sample(mutable_cols, 2)
+    r = random.choice(conflict_rows)
 
-    mutant[row][c1], mutant[row][c2] = mutant[row][c2], mutant[row][c1]
+    # Only swap cells that were not fixed in the original puzzle
+    mutable = [c for c in range(9) if not mask[r][c]]
+
+    if len(mutable) < 2:
+        return mutant
+
+    # Swap two mutable positions to introduce variation
+    c1, c2 = random.sample(mutable, 2)
+
+    mutant[r][c1], mutant[r][c2] = mutant[r][c2], mutant[r][c1]
 
     return mutant
 
@@ -146,18 +155,22 @@ Recombination methods
 """
 
 def sudoku_row_crossover(parent1, parent2):
-    point = random.randint(1, 8)
+    """Crossover: exchange a random 3x3 box between parents."""
 
-    offspring1 = []
-    offspring2 = []
+    offspring1 = [row.copy() for row in parent1]
+    offspring2 = [row.copy() for row in parent2]
 
-    for r in range(point):
-        offspring1.append(parent1[r].copy())
-        offspring2.append(parent2[r].copy())
+    # Choose a random 3x3 box
+    box = random.randint(0, 8)
 
-    for r in range(point, 9):
-        offspring1.append(parent2[r].copy())
-        offspring2.append(parent1[r].copy())
+    box_row = (box // 3) * 3
+    box_col = (box % 3) * 3
+
+    # Swap all values inside the selected box
+    for r in range(box_row, box_row + 3):
+        for c in range(box_col, box_col + 3):
+            offspring1[r][c] = parent2[r][c]
+            offspring2[r][c] = parent1[r][c]
 
     return offspring1, offspring2
 
@@ -203,24 +216,33 @@ def sort_population(population, fitness):
     return sorted_pop, sorted_fit
 
 def replacement(current_pop, current_fitness, offspring, offspring_fitness):
-    """Offspring replace the worst individuals in the current generation."""
-    population = []
-    fitness = []
+    """Survivor selection that preserves diversity."""
 
-    sorted_pop, sorted_fit = sort_population(current_pop.copy(), current_fitness.copy())
-    k = len(current_pop) - len(offspring)  # number of elites to keep
+    combined_pop = current_pop + offspring
+    combined_fit = current_fitness + offspring_fitness
 
-    # keep top-k from current population
-    for i in range(0, k):
-        population.append(sorted_pop[i])
-        fitness.append(sorted_fit[i])
+    # sort by fitness (best first)
+    pop_fit = list(zip(combined_pop, combined_fit))
+    pop_fit.sort(key=lambda x: x[1], reverse=True)
 
-    # add all offspring
-    for j in range(0, len(offspring)):
-        population.append(offspring[j])
-        fitness.append(offspring_fitness[j])
+    new_population = []
+    new_fitness = []
 
-    return population, fitness
+    seen = set()
+
+    for individual, fit in pop_fit:
+        key = tuple(tuple(row) for row in individual)
+
+        # avoid duplicates to keep population diverse
+        if key not in seen:
+            new_population.append(individual)
+            new_fitness.append(fit)
+            seen.add(key)
+
+        if len(new_population) == len(current_pop):
+            break
+
+    return new_population, new_fitness
 
 def print_grid(grid):
     print("=====================")
@@ -266,6 +288,9 @@ def main():
 
     print("generation", gen, ": best fitness", max(fitness),
           "average fitness", round(sum(fitness) / len(fitness), 2))
+    
+    best_seen = max(fitness)
+    stagnation = 0
 
     # evolution begins
     while gen < gen_limit and max(fitness) < 243:
@@ -301,9 +326,25 @@ def main():
         # survivor selection
         population, fitness = replacement(population, fitness, offspring, offspring_fitness)
 
+        # check improvement
+        current_best = max(fitness)
+
+        if current_best > best_seen:
+            best_seen = current_best
+            stagnation = 0
+        else:
+            stagnation += 1
+
+        # restart if stuck
+        if stagnation > 100:
+            print("Restarting population due to stagnation...")
+            population = sudoku_population(popsize, given_grid)
+            fitness = [fitness_sudoku(ind) for ind in population]
+            stagnation = 0
+
         gen = gen + 1
         print("generation", gen, ": best fitness", max(fitness),
-              "average fitness", round(sum(fitness) / len(fitness), 2))
+            "average fitness", round(sum(fitness) / len(fitness), 2))
 
     # print best candidate found
     best_index = fitness.index(max(fitness))
