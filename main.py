@@ -4,7 +4,6 @@ CISC455/851 Group Project - EA for 9x9 Sudoku
 
 # 0s are designated as "empty" spots, they need to be filled in by the EA with 1-9 values
 import random
-import operator
 
 DEFAULT_PUZZLE = (
     "530070000"
@@ -38,6 +37,7 @@ def col_conflicts(grid):
     return conflicts
 
 def box_conflicts(grid):
+    # Included for completeness, though box validity is mostly preserved by representation.
     conflicts = 0
     for box_row in range(0, 9, 3):
         for box_col in range(0, 9, 3):
@@ -120,77 +120,76 @@ Mutation methods
 """
 
 def sudoku_swap(individual, mask):
-    """Mutation: swap two mutable values in a 3x3 box with conflicts."""
+    """Mutation: swap two mutable values in one 3x3 box.
+
+    Preference: choose a box that contains row/column conflicts, so the swap is useful.
+    Fallback: choose any box with at least two mutable cells.
+    """
     # Copy individual so the original candidate is not modified
     mutant = [row.copy() for row in individual]
 
-    # Find all 3x3 boxes with conflicts (duplicates)
-    conflict_boxes = []
-    
+    # Cells that are part of row/column duplicates (where fitness can improve)
+    conflicted_cells = []
+    for r in range(9):
+        for c in range(9):
+            if mask[r][c]:
+                continue
+            value = mutant[r][c]
+            row_dups = mutant[r].count(value) - 1
+            col_dups = sum(1 for rr in range(9) if mutant[rr][c] == value) - 1
+            if row_dups + col_dups > 0:
+                conflicted_cells.append((r, c))
+
+    # Candidate boxes to mutate, preferred from conflicted cells
+    preferred_boxes = []
+    for r, c in conflicted_cells:
+        box_idx = (r // 3) * 3 + (c // 3)
+        if box_idx not in preferred_boxes:
+            preferred_boxes.append(box_idx)
+
+    # Fallback: any box with >=2 mutable cells
+    all_valid_boxes = []
     for box_idx in range(9):
         box_row = (box_idx // 3) * 3
         box_col = (box_idx % 3) * 3
-        
-        values = []
+        mutable_count = 0
         for r in range(box_row, box_row + 3):
             for c in range(box_col, box_col + 3):
-                values.append(mutant[r][c])
-        
-        # If box has duplicates, it's a conflict box
-        if len(set(values)) < 9:
-            conflict_boxes.append(box_idx)
-    
-    if not conflict_boxes:
+                if not mask[r][c]:
+                    mutable_count += 1
+        if mutable_count >= 2:
+            all_valid_boxes.append(box_idx)
+
+    if not all_valid_boxes:
         return mutant
-    
-    # Pick a random conflict box
-    box = random.choice(conflict_boxes)
+
+    candidate_boxes = [b for b in preferred_boxes if b in all_valid_boxes]
+    if not candidate_boxes:
+        candidate_boxes = all_valid_boxes
+
+    box = random.choice(candidate_boxes)
     box_row = (box // 3) * 3
     box_col = (box % 3) * 3
-    
-    # Get all mutable positions in this box
+
     mutable = []
     for r in range(box_row, box_row + 3):
         for c in range(box_col, box_col + 3):
             if not mask[r][c]:
                 mutable.append((r, c))
-    
+
     if len(mutable) < 2:
         return mutant
-    
-    # Swap two mutable positions within the box
+
     (r1, c1), (r2, c2) = random.sample(mutable, 2)
     mutant[r1][c1], mutant[r2][c2] = mutant[r2][c2], mutant[r1][c1]
-    
-    return mutant
 
-def sudoku_aggressive_swap(individual, mask):
-    """Aggressive mutation: swap two random mutable values anywhere in the puzzle."""
-    mutant = [row.copy() for row in individual]
-    
-    # Get all mutable positions
-    mutable = []
-    for r in range(9):
-        for c in range(9):
-            if not mask[r][c]:
-                mutable.append((r, c))
-    
-    if len(mutable) < 2:
-        return mutant
-    
-    # Do multiple swaps for a more aggressive mutation
-    num_swaps = random.randint(1, 3)
-    for _ in range(num_swaps):
-        (r1, c1), (r2, c2) = random.sample(mutable, 2)
-        mutant[r1][c1], mutant[r2][c2] = mutant[r2][c2], mutant[r1][c1]
-    
     return mutant
 
 """
 Recombination methods
 """
 
-def sudoku_row_crossover(parent1, parent2):
+def sudoku_box_crossover(parent1, parent2):
     """Crossover: exchange a random 3x3 box between parents."""
 
     offspring1 = [row.copy() for row in parent1]
@@ -219,7 +218,6 @@ def tournament(fitness, mating_pool_size, tournament_size):
     selected_to_mate = []
 
     while len(selected_to_mate) < mating_pool_size:
-
         # pick random individuals for the tournament
         competitors = random.sample(range(len(fitness)), tournament_size)
 
@@ -238,21 +236,8 @@ def tournament(fitness, mating_pool_size, tournament_size):
 Survivor selection methods
 """
 
-def sort_population(population, fitness):
-    pop_fit_pair = list(map(list, zip(population, fitness)))
-    pop_fit_pair.sort(key=operator.itemgetter(1), reverse=True)
-
-    sorted_pop = []
-    sorted_fit = []
-
-    for entry in pop_fit_pair:
-        sorted_pop.append(entry[0])
-        sorted_fit.append(entry[1])
-
-    return sorted_pop, sorted_fit
-
 def replacement(current_pop, current_fitness, offspring, offspring_fitness):
-    """Survivor selection that preserves diversity."""
+    """Survivor selection that prefers unique individuals when possible."""
 
     combined_pop = current_pop + offspring
     combined_fit = current_fitness + offspring_fitness
@@ -263,20 +248,38 @@ def replacement(current_pop, current_fitness, offspring, offspring_fitness):
 
     new_population = []
     new_fitness = []
-
     seen = set()
+    duplicate_pool = []
+    target_size = len(current_pop)
 
+    # Keep the best unique individuals first, save duplicates for possible refill.
     for individual, fit in pop_fit:
         key = tuple(tuple(row) for row in individual)
 
-        # avoid duplicates to keep population diverse
         if key not in seen:
             new_population.append(individual)
             new_fitness.append(fit)
             seen.add(key)
+        else:
+            duplicate_pool.append((individual, fit))
 
-        if len(new_population) == len(current_pop):
+        if len(new_population) == target_size:
             break
+
+    # Refill if dedup removed too many candidates.
+    # Sample from a top slice of duplicates so we keep fitness pressure
+    # without repeatedly cloning only the very top individual.
+    if len(new_population) < target_size:
+        refill_pool = duplicate_pool if duplicate_pool else pop_fit
+        top_slice = refill_pool[: max(1, min(len(refill_pool), 100))]
+
+        while len(new_population) < target_size:
+            individual, fit = random.choice(top_slice)
+            new_population.append(individual)
+            new_fitness.append(fit)
+
+    if len(new_population) != target_size or len(new_fitness) != target_size:
+        raise RuntimeError("Replacement failed to maintain population size.")
 
     return new_population, new_fitness
 
@@ -309,11 +312,10 @@ def main():
 
     # EA parameters
     popsize = 1000
-    mating_pool_size = 1000
+    mating_pool_size = 1000 # keep even
     tournament_size = 4
     xover_rate = 0.9
     mut_rate = 0.7
-    agg_mut_rate = 0.15
     gen_limit = 5000
 
     # initialize population
@@ -328,6 +330,9 @@ def main():
 
     # evolution begins
     while gen < gen_limit and max(fitness) < 243:
+        if len(population) < tournament_size:
+            raise RuntimeError("Population too small for tournament selection.")
+
         parents_index = tournament(fitness, mating_pool_size, tournament_size)
         random.shuffle(parents_index)
 
@@ -341,20 +346,16 @@ def main():
 
             # recombination
             if random.random() < xover_rate:
-                off1, off2 = sudoku_row_crossover(p1, p2)
+                off1, off2 = sudoku_box_crossover(p1, p2)
             else:
                 off1 = [row.copy() for row in p1]
                 off2 = [row.copy() for row in p2]
 
-            # mutation - apply twice for stronger exploration
+            # mutation
             if random.random() < mut_rate:
                 off1 = sudoku_swap(off1, mask)
-                if random.random() < agg_mut_rate:
-                    off1 = sudoku_aggressive_swap(off1, mask)
             if random.random() < mut_rate:
                 off2 = sudoku_swap(off2, mask)
-                if random.random() < agg_mut_rate:
-                    off2 = sudoku_aggressive_swap(off2, mask)
 
             offspring.append(off1)
             offspring_fitness.append(fitness_sudoku(off1))
