@@ -120,34 +120,70 @@ Mutation methods
 """
 
 def sudoku_swap(individual, mask):
-    """Mutation: swap two mutable values in a row that contains conflicts."""
-
-    # Copy individual so original candidate is not modified
+    """Mutation: swap two mutable values in a 3x3 box with conflicts."""
+    # Copy individual so the original candidate is not modified
     mutant = [row.copy() for row in individual]
 
-    conflict_rows = []
-
-    # Identify rows that currently violate Sudoku constraints (duplicates)
-    for r in range(9):
-        if len(set(mutant[r])) < 9:
-            conflict_rows.append(r)
-
-    if not conflict_rows:
+    # Find all 3x3 boxes with conflicts (duplicates)
+    conflict_boxes = []
+    
+    for box_idx in range(9):
+        box_row = (box_idx // 3) * 3
+        box_col = (box_idx % 3) * 3
+        
+        values = []
+        for r in range(box_row, box_row + 3):
+            for c in range(box_col, box_col + 3):
+                values.append(mutant[r][c])
+        
+        # If box has duplicates, it's a conflict box
+        if len(set(values)) < 9:
+            conflict_boxes.append(box_idx)
+    
+    if not conflict_boxes:
         return mutant
-
-    r = random.choice(conflict_rows)
-
-    # Only swap cells that were not fixed in the original puzzle
-    mutable = [c for c in range(9) if not mask[r][c]]
-
+    
+    # Pick a random conflict box
+    box = random.choice(conflict_boxes)
+    box_row = (box // 3) * 3
+    box_col = (box % 3) * 3
+    
+    # Get all mutable positions in this box
+    mutable = []
+    for r in range(box_row, box_row + 3):
+        for c in range(box_col, box_col + 3):
+            if not mask[r][c]:
+                mutable.append((r, c))
+    
     if len(mutable) < 2:
         return mutant
+    
+    # Swap two mutable positions within the box
+    (r1, c1), (r2, c2) = random.sample(mutable, 2)
+    mutant[r1][c1], mutant[r2][c2] = mutant[r2][c2], mutant[r1][c1]
+    
+    return mutant
 
-    # Swap two mutable positions to introduce variation
-    c1, c2 = random.sample(mutable, 2)
-
-    mutant[r][c1], mutant[r][c2] = mutant[r][c2], mutant[r][c1]
-
+def sudoku_aggressive_swap(individual, mask):
+    """Aggressive mutation: swap two random mutable values anywhere in the puzzle."""
+    mutant = [row.copy() for row in individual]
+    
+    # Get all mutable positions
+    mutable = []
+    for r in range(9):
+        for c in range(9):
+            if not mask[r][c]:
+                mutable.append((r, c))
+    
+    if len(mutable) < 2:
+        return mutant
+    
+    # Do multiple swaps for a more aggressive mutation
+    num_swaps = random.randint(1, 3)
+    for _ in range(num_swaps):
+        (r1, c1), (r2, c2) = random.sample(mutable, 2)
+        mutant[r1][c1], mutant[r2][c2] = mutant[r2][c2], mutant[r1][c1]
+    
     return mutant
 
 """
@@ -273,11 +309,12 @@ def main():
 
     # EA parameters
     popsize = 1000
-    mating_pool_size = 500  # keep even so parents pair cleanly
-    tournament_size = 2
-    xover_rate = 0.65
-    mut_rate = 0.85
-    gen_limit = 1000
+    mating_pool_size = 1000
+    tournament_size = 4
+    xover_rate = 0.9
+    mut_rate = 0.7
+    agg_mut_rate = 0.15
+    gen_limit = 5000
 
     # initialize population
     gen = 0
@@ -288,9 +325,6 @@ def main():
 
     print("generation", gen, ": best fitness", max(fitness),
           "average fitness", round(sum(fitness) / len(fitness), 2))
-    
-    best_seen = max(fitness)
-    stagnation = 0
 
     # evolution begins
     while gen < gen_limit and max(fitness) < 243:
@@ -312,11 +346,15 @@ def main():
                 off1 = [row.copy() for row in p1]
                 off2 = [row.copy() for row in p2]
 
-            # mutation
+            # mutation - apply twice for stronger exploration
             if random.random() < mut_rate:
                 off1 = sudoku_swap(off1, mask)
+                if random.random() < agg_mut_rate:
+                    off1 = sudoku_aggressive_swap(off1, mask)
             if random.random() < mut_rate:
                 off2 = sudoku_swap(off2, mask)
+                if random.random() < agg_mut_rate:
+                    off2 = sudoku_aggressive_swap(off2, mask)
 
             offspring.append(off1)
             offspring_fitness.append(fitness_sudoku(off1))
@@ -325,23 +363,6 @@ def main():
 
         # survivor selection
         population, fitness = replacement(population, fitness, offspring, offspring_fitness)
-
-        # check improvement
-        current_best = max(fitness)
-
-        if current_best > best_seen:
-            best_seen = current_best
-            stagnation = 0
-        else:
-            stagnation += 1
-
-        # restart if stuck
-        if stagnation > 100:
-            print("Restarting population due to stagnation...")
-            population = sudoku_population(popsize, given_grid)
-            fitness = [fitness_sudoku(ind) for ind in population]
-            stagnation = 0
-
         gen = gen + 1
         print("generation", gen, ": best fitness", max(fitness),
             "average fitness", round(sum(fitness) / len(fitness), 2))
