@@ -7,7 +7,6 @@ Default: 5 repeats per puzzle (adjustable).
 import os
 import time
 import random
-import statistics
 
 import numpy as np
 import matplotlib.pyplot as plt
